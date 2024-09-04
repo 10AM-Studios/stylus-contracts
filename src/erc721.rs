@@ -61,6 +61,7 @@ sol! {
     error ReceiverRefused(address receiver, uint256 token_id, bytes4 returned);
     error SaleNotOpen();
     error MaxMintForAddress();
+    error InvalidSaleSetup();
 }
 
 /// Represents the ways methods may fail.
@@ -73,6 +74,7 @@ pub enum Erc721Error {
     ReceiverRefused(ReceiverRefused),
     SaleNotOpen(SaleNotOpen),
     MaxMintForAddress(MaxMintForAddress),
+    InvalidSaleSetup(InvalidSaleSetup),
 }
 
 // External interfaces
