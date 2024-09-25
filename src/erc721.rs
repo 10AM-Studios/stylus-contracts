@@ -8,7 +8,7 @@
 //!
 //! Note that this code is unaudited and not fit for production use.
 
-use alloc::vec;
+use alloc::{string::String, vec, vec::Vec};
 use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_sol_types::sol;
 use core::{borrow::BorrowMut, marker::PhantomData};
@@ -38,6 +38,8 @@ sol_storage! {
         mapping(address => mapping(address => bool)) operator_approvals;
         /// Total supply
         uint256 total_supply;
+        address owner;
+        bool initialized;
         /// Used to allow [`Erc721Params`]
         PhantomData<T> phantom;
     }
@@ -48,6 +50,7 @@ sol! {
     event Transfer(address indexed from, address indexed to, uint256 indexed token_id);
     event Approval(address indexed owner, address indexed approved, uint256 indexed token_id);
     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
+    event OwnershipTransferred(address indexed previous_owner, address indexed new_owner);
 
     // Token id has not been minted, or it has been burned
     error InvalidTokenId(uint256 token_id);
@@ -62,6 +65,10 @@ sol! {
     error SaleNotOpen();
     error MaxMintForAddress();
     error InvalidSaleSetup();
+
+    error OwnableUnauthorizedAccount(address account);
+    error OwnableInvalidOwner(address owner);
+    error OwnableAlreadyInitialized();
 }
 
 /// Represents the ways methods may fail.
@@ -75,6 +82,9 @@ pub enum Erc721Error {
     SaleNotOpen(SaleNotOpen),
     MaxMintForAddress(MaxMintForAddress),
     InvalidSaleSetup(InvalidSaleSetup),
+    OwnableUnauthorizedAccount(OwnableUnauthorizedAccount),
+    OwnableInvalidOwner(OwnableInvalidOwner),
+    OwnableAlreadyInitialized(OwnableAlreadyInitialized),
 }
 
 // External interfaces
@@ -183,7 +193,7 @@ impl<T: Erc721Params> Erc721<T> {
                     Erc721Error::ReceiverRefused(ReceiverRefused {
                         receiver: receiver.address,
                         token_id,
-                        returned: FixedBytes(0_u32.to_be_bytes()),
+                        returned: alloy_primitives::FixedBytes(0_u32.to_be_bytes()),
                     })
                 })?
                 .0;
@@ -192,7 +202,7 @@ impl<T: Erc721Params> Erc721<T> {
                 return Err(Erc721Error::ReceiverRefused(ReceiverRefused {
                     receiver: receiver.address,
                     token_id,
-                    returned: FixedBytes(received),
+                    returned: alloy_primitives::FixedBytes(received),
                 }));
             }
         }
@@ -225,10 +235,31 @@ impl<T: Erc721Params> Erc721<T> {
         self.transfer(token_id, from, Address::default())?;
         Ok(())
     }
+
+    pub fn only_owner(&mut self) -> Result<(), Erc721Error> {
+        if msg::sender() != self.owner.get() {
+            return Err(Erc721Error::OwnableUnauthorizedAccount(
+                OwnableUnauthorizedAccount {
+                    account: msg::sender(),
+                },
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn transfer_ownership_impl(&mut self, new_owner: Address) {
+        let old_owner = self.owner.get();
+        self.owner.set(new_owner);
+        evm::log(OwnershipTransferred {
+            previous_owner: old_owner,
+            new_owner: new_owner,
+        });
+    }
 }
 
 // these methods are external to other contracts
-#[external]
+#[public]
 impl<T: Erc721Params> Erc721<T> {
     /// Immutable NFT name.
     pub fn name() -> Result<String, Erc721Error> {
@@ -382,5 +413,38 @@ impl<T: Erc721Params> Erc721<T> {
             u32::from_be_bytes(interface_slice_array),
             IERC165 | IERC721 | IERC721_METADATA
         ))
+    }
+
+    pub fn renounce_ownership(&mut self) -> Result<(), Erc721Error> {
+        self.only_owner()?;
+
+        self.transfer_ownership_impl(Address::ZERO);
+        Ok(())
+    }
+
+    pub fn transfer_ownership(&mut self, new_owner: Address) -> Result<(), Erc721Error> {
+        self.only_owner()?;
+        self.transfer_ownership_impl(new_owner);
+        Ok(())
+    }
+
+    pub fn owner(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.owner.get())
+    }
+
+    pub fn initialize(&mut self, initial_owner: Address) -> Result<(), Erc721Error> {
+        if self.initialized.get() {
+            return Err(Erc721Error::OwnableAlreadyInitialized(
+                OwnableAlreadyInitialized {},
+            ));
+        }
+        if initial_owner == Address::ZERO {
+            return Err(Erc721Error::OwnableInvalidOwner(OwnableInvalidOwner {
+                owner: initial_owner,
+            }));
+        }
+        self.transfer_ownership_impl(initial_owner);
+        self.initialized.set(true);
+        Ok(())
     }
 }

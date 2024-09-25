@@ -1,5 +1,9 @@
 use alloc::vec::Vec;
-use stylus_sdk::{alloy_primitives::Address, alloy_sol_types::sol, evm, msg, prelude::*};
+use stylus_sdk::{
+    alloy_primitives::Address, alloy_sol_types::sol, call::MethodError, evm, msg, prelude::*,
+};
+
+const ZERO_ADDRESS: Address = Address::ZERO;
 
 sol_storage! {
     pub struct Ownable {
@@ -49,22 +53,17 @@ impl Ownable {
 }
 
 // External methods
-#[external]
+#[public]
 impl Ownable {
     pub fn renounce_ownership(&mut self) -> Result<(), OwnableError> {
         self.only_owner()?;
 
-        self.transfer_ownership_impl(Address::ZERO);
+        self.transfer_ownership_impl(ZERO_ADDRESS);
         Ok(())
     }
 
     pub fn transfer_ownership(&mut self, new_owner: Address) -> Result<(), OwnableError> {
         self.only_owner()?;
-        if new_owner == Address::ZERO {
-            return Err(OwnableError::OwnableInvalidOwner(OwnableInvalidOwner {
-                owner: new_owner,
-            }));
-        }
         self.transfer_ownership_impl(new_owner);
         Ok(())
     }
@@ -79,7 +78,7 @@ impl Ownable {
                 OwnableAlreadyInitialized {},
             ));
         }
-        if initial_owner == Address::ZERO {
+        if initial_owner == ZERO_ADDRESS {
             return Err(OwnableError::OwnableInvalidOwner(OwnableInvalidOwner {
                 owner: initial_owner,
             }));
